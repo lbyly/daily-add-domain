@@ -1,45 +1,48 @@
-name: Daily Cloudflare Domain Check
+name: Cloudflare Domain Auto-Add Bot
 
 on:
   schedule:
-    # 每 60 分钟运行一次 (每小时的第 0 分钟触发)
+    # 每 60 分钟运行一次 (UTC 时间每小时的 0 分)
     - cron: '0 * * * *'
-  workflow_dispatch: # 允许你手动点击按钮立即测试
+  workflow_dispatch: # 支持手动点击按钮运行
 
 jobs:
-  check-domain:
+  auto-add:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v3
 
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.x'
+          python-version: '3.10'
 
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install requests
+        run: pip install requests
 
-      - name: Run Cloudflare script
+      - name: Run Add Domain Script
         env:
-          # 请在 GitHub Repo 的 Settings -> Secrets and variables -> Actions 中添加这些变量
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          CF_EMAIL: ${{ secrets.CF_EMAIL }}
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
         run: |
           python - <<EOF
           import requests
           import os
+          import sys
 
-          def try_add_domain():
-              api_token = os.getenv("CF_API_TOKEN")
-              account_id = os.getenv("CF_ACCOUNT_ID")
-              domain_name = "lbo.indevs.in"
-              
+          def run_task():
+              # 从 GitHub Secrets 获取配置
+              api_token = os.getenv("CF_API_TOKEN", "").strip()
+              account_id = os.getenv("CF_ACCOUNT_ID", "").strip()
+              domain = "lbo.indevs.in"
+
+              if not api_token or not account_id:
+                  print("❌ 错误: 请先在 GitHub Secrets 中配置 CF_API_TOKEN 和 CF_ACCOUNT_ID")
+                  sys.exit(1)
+
+              print(f"🚀 正在尝试添加域名: {domain} ...")
+
               url = "https://api.cloudflare.com/client/v4/zones"
               headers = {
                   "Authorization": f"Bearer {api_token}",
@@ -47,19 +50,34 @@ jobs:
               }
               data = {
                   "account": {"id": account_id},
-                  "name": domain_name,
+                  "name": domain,
                   "type": "full"
               }
 
-              response = requests.post(url, headers=headers, json=data)
-              result = response.json()
+              try:
+                  response = requests.post(url, headers=headers, json=data)
+                  res_data = response.json()
 
-              if result.get("success"):
-                  print(f"✅ 成功！域名 {domain_name} 已添加到 Cloudflare。")
-              else:
-                  error_msg = result['errors'][0]['message']
-                  print(f"❌ 失败：{error_msg}")
+                  if res_data.get("success"):
+                      print("========================================")
+                      print(f"🎉 恭喜！域名 {domain} 已成功添加到 Cloudflare！")
+                      print("========================================")
+                  else:
+                      errors = res_data.get("errors", [])
+                      msg = errors[0].get("message") if errors else "未知错误"
+                      code = errors[0].get("code") if errors else "无代码"
+                      
+                      print(f"❌ 添加失败 (代码: {code})")
+                      print(f"📝 原因: {msg}")
+
+                      if code == 1049 or "not a registered domain" in msg:
+                          print("💡 状态确认: Cloudflare 系统目前仍不支持该后缀，脚本将在 1 小时后重试。")
+                      elif code == 1000 or "Permission denied" in msg:
+                          print("⚠️ 权限提醒: 请检查 Cloudflare Token 是否开启了 'Zone:Zone:Edit' 权限。")
+              
+              except Exception as e:
+                  print(f"💥 运行异常: {e}")
 
           if __name__ == "__main__":
-              try_add_domain()
+              run_task()
           EOF
