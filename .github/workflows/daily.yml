@@ -1,54 +1,69 @@
-name: Cloudflare Domain Auto-Add (Global Key Version)
+name: Cloudflare Domain Auto-Add Final
 
 on:
   schedule:
-    - cron: '0 * * * *' # 每小时运行
-  workflow_dispatch:
+    - cron: '0 * * * *' # 每 60 分钟运行一次
+  workflow_dispatch: # 支持手动点击运行
 
 jobs:
   auto-add:
     runs-on: ubuntu-latest
     steps:
-      - name: Run Script
+      - name: Run Add Script
         env:
-          CF_API_KEY: ${{ secrets.CF_API_TOKEN }}
-          CF_EMAIL: ${{ secrets.CF_EMAIL }}
-          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_KEY: ${{ secrets.CF_API_TOKEN }}
+          CF_MAIL: ${{ secrets.CF_EMAIL }}
+          CF_ACC_ID: ${{ secrets.CF_ACCOUNT_ID }}
         run: |
           python - <<EOF
           import requests
           import os
 
-          def run():
-              api_key = os.getenv("CF_API_KEY", "").strip()
-              email = os.getenv("CF_EMAIL", "").strip()
-              account_id = os.getenv("CF_ACCOUNT_ID", "").strip()
+          def start():
+              # 获取并清理环境变量
+              key = os.getenv("CF_KEY", "").strip()
+              email = os.getenv("CF_MAIL", "").strip()
+              acc_id = os.getenv("CF_ACC_ID", "").strip()
               domain = "lbo.indevs.in"
+
+              print(f"📡 正在验证身份并尝试添加: {domain}")
 
               url = "https://api.cloudflare.com/client/v4/zones"
               
-              # Global Key 必须使用 X-Auth-Key 和 X-Auth-Email
+              # Global Key 的标准 Headers
               headers = {
                   "X-Auth-Email": email,
-                  "X-Auth-Key": api_key,
+                  "X-Auth-Key": key,
                   "Content-Type": "application/json",
               }
-              data = {
-                  "account": {"id": account_id},
+              
+              payload = {
+                  "account": {"id": acc_id},
                   "name": domain,
                   "type": "full"
               }
 
-              res = requests.post(url, headers=headers, json=data).json()
+              try:
+                  response = requests.post(url, headers=headers, json=payload)
+                  data = response.json()
 
-              if res.get("success"):
-                  print(f"🎉 成功！域名 {domain} 已添加。")
-              else:
-                  error = res['errors'][0]
-                  print(f"❌ 失败 (代码: {error['code']}): {error['message']}")
-                  if error['code'] == 1049:
-                      print("💡 状态：权限已通！报错 1049 确认 Cloudflare 暂不支持该后缀，脚本将持续监测。")
+                  if data.get("success"):
+                      print(f"🎉 SUCCESS! {domain} 已成功添加到 Cloudflare。")
+                  else:
+                      err = data['errors'][0]
+                      code = err.get('code')
+                      msg = err.get('message')
+                      print(f"❌ 失败 (代码: {code})")
+                      print(f"📝 详情: {msg}")
+
+                      if code == 1049:
+                          print("✅ [权限已过关] 后缀暂不支持。脚本将按计划每小时重试。")
+                      elif code == 1068 or code == 1000:
+                          print("⚠️ [权限仍被拒绝] 请务必确认 CF_ACCOUNT_ID 和 Global API Key 是否匹配。")
+              
+              except Exception as e:
+                  print(f"💥 脚本崩溃: {e}")
 
           if __name__ == "__main__":
-              run()
+              start()
           EOF
