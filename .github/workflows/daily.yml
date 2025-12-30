@@ -1,69 +1,74 @@
-name: Cloudflare Domain Auto-Add Final
+name: Cloudflare Domain Bot with Email Notification
 
 on:
   schedule:
-    - cron: '0 * * * *' # 每 60 分钟运行一次
-  workflow_dispatch: # 支持手动点击运行
+    - cron: '0 * * * *' # 每小时运行一次
+  workflow_dispatch: # 支持手动运行
 
 jobs:
   auto-add:
     runs-on: ubuntu-latest
     steps:
-      - name: Run Add Script
+      - name: Run Script
         env:
           CF_KEY: ${{ secrets.CF_API_TOKEN }}
           CF_MAIL: ${{ secrets.CF_EMAIL }}
           CF_ACC_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          RECEIVER_MAIL: ${{ secrets.EMAIL_RECEIVER }}
+          SENDER_PASS: ${{ secrets.EMAIL_PASSWORD }}
         run: |
           python - <<EOF
           import requests
           import os
+          import smtplib
+          from email.mime.text import MIMEText
+          from email.header import Header
 
-          def start():
-              # 获取并清理环境变量
+          def send_email(domain):
+              sender = os.getenv("CF_MAIL") # 使用你的CF邮箱作为发件人
+              password = os.getenv("SENDER_PASS")
+              receiver = os.getenv("RECEIVER_MAIL")
+              
+              msg = MIMEText(f"🎉 喜报！域名 {domain} 已经成功添加到您的 Cloudflare 账号中！", 'plain', 'utf-8')
+              msg['From'] = sender
+              msg['To'] = receiver
+              msg['Subject'] = Header("Cloudflare 域名添加成功通知", 'utf-8')
+
+              try:
+                  # 这里以 Gmail 为例，如果用 QQ 邮箱改用 smtp.qq.com
+                  server = smtplib.SMTP_SSL("smtp.gmail.com", 465)
+                  server.login(sender, password)
+                  server.sendmail(sender, [receiver], msg.as_string())
+                  server.quit()
+                  print("📧 邮件通知已发送！")
+              except Exception as e:
+                  print(f"❌ 邮件发送失败: {e}")
+
+          def run():
               key = os.getenv("CF_KEY", "").strip()
               email = os.getenv("CF_MAIL", "").strip()
               acc_id = os.getenv("CF_ACC_ID", "").strip()
-              domain = "lbo.indevs.in"
-
-              print(f"📡 正在验证身份并尝试添加: {domain}")
+              domain = "indevs.in" # 建议监听根域名
 
               url = "https://api.cloudflare.com/client/v4/zones"
-              
-              # Global Key 的标准 Headers
               headers = {
                   "X-Auth-Email": email,
                   "X-Auth-Key": key,
                   "Content-Type": "application/json",
               }
-              
-              payload = {
-                  "account": {"id": acc_id},
-                  "name": domain,
-                  "type": "full"
-              }
+              payload = {"account": {"id": acc_id}, "name": domain, "type": "full"}
 
               try:
-                  response = requests.post(url, headers=headers, json=payload)
-                  data = response.json()
-
-                  if data.get("success"):
-                      print(f"🎉 SUCCESS! {domain} 已成功添加到 Cloudflare。")
+                  res = requests.post(url, headers=headers, json=payload).json()
+                  if res.get("success"):
+                      print(f"🎉 {domain} 添加成功！")
+                      send_email(domain)
                   else:
-                      err = data['errors'][0]
-                      code = err.get('code')
-                      msg = err.get('message')
-                      print(f"❌ 失败 (代码: {code})")
-                      print(f"📝 详情: {msg}")
-
-                      if code == 1049:
-                          print("✅ [权限已过关] 后缀暂不支持。脚本将按计划每小时重试。")
-                      elif code == 1068 or code == 1000:
-                          print("⚠️ [权限仍被拒绝] 请务必确认 CF_ACCOUNT_ID 和 Global API Key 是否匹配。")
-              
+                      err = res['errors'][0]
+                      print(f"❌ 状态: {err['code']} - {err['message']}")
               except Exception as e:
-                  print(f"💥 脚本崩溃: {e}")
+                  print(f"💥 出错: {e}")
 
           if __name__ == "__main__":
-              start()
+              run()
           EOF
