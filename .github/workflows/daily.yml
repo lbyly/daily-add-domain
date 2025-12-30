@@ -1,0 +1,65 @@
+name: Daily Cloudflare Domain Check
+
+on:
+  schedule:
+    # 每 60 分钟运行一次 (每小时的第 0 分钟触发)
+    - cron: '0 * * * *'
+  workflow_dispatch: # 允许你手动点击按钮立即测试
+
+jobs:
+  check-domain:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
+
+      - name: Run Cloudflare script
+        env:
+          # 请在 GitHub Repo 的 Settings -> Secrets and variables -> Actions 中添加这些变量
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_EMAIL: ${{ secrets.CF_EMAIL }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+        run: |
+          python - <<EOF
+          import requests
+          import os
+
+          def try_add_domain():
+              api_token = os.getenv("CF_API_TOKEN")
+              account_id = os.getenv("CF_ACCOUNT_ID")
+              domain_name = "lbo.indevs.in"
+              
+              url = "https://api.cloudflare.com/client/v4/zones"
+              headers = {
+                  "Authorization": f"Bearer {api_token}",
+                  "Content-Type": "application/json",
+              }
+              data = {
+                  "account": {"id": account_id},
+                  "name": domain_name,
+                  "type": "full"
+              }
+
+              response = requests.post(url, headers=headers, json=data)
+              result = response.json()
+
+              if result.get("success"):
+                  print(f"✅ 成功！域名 {domain_name} 已添加到 Cloudflare。")
+              else:
+                  error_msg = result['errors'][0]['message']
+                  print(f"❌ 失败：{error_msg}")
+
+          if __name__ == "__main__":
+              try_add_domain()
+          EOF
