@@ -48,7 +48,7 @@ jobs:
               key = os.getenv("CF_KEY", "").strip()
               email = os.getenv("CF_MAIL", "").strip()
               acc_id = os.getenv("CF_ACC_ID", "").strip()
-              domain = "indevs.in" # 建议监听根域名
+              domain = "lbo.indevs.in" # 建议监听二级域名
 
               url = "https://api.cloudflare.com/client/v4/zones"
               headers = {
